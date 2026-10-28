@@ -282,7 +282,7 @@ namespace SourceRefresher
 
                 LogInfo($"Loaded config from '{configPath}': {rules.Count} rule(s)");
 
-                RefreshManager.SetRules(rules, initial: true);
+                RefreshManager.SetRules(rules);
             }
             catch (Exception ex)
             {

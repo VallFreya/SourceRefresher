@@ -19,6 +19,16 @@ namespace SourceRefresher
             return new Font(ObsTheme.FontFamily, ObsTheme.FontPt * 96f / 72f * K * scale, style, GraphicsUnit.Pixel);
         }
 
+        /// <summary>Цвет между a и b: t = 0 даёт a, t = 1 даёт b (так рисуются «бледные» значки)</summary>
+        public static Color Mix(Color a, Color b, float t)
+        {
+            t = Math.Clamp(t, 0f, 1f);
+            return Color.FromArgb(
+                (int)Math.Round(a.R + (b.R - a.R) * t),
+                (int)Math.Round(a.G + (b.G - a.G) * t),
+                (int)Math.Round(a.B + (b.B - a.B) * t));
+        }
+
         public static GraphicsPath RoundedRect(RectangleF rect, float radius)
         {
             var path = new GraphicsPath();

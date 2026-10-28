@@ -442,14 +442,17 @@ namespace SourceRefresher
             _statusTimer.Start();
         }
 
-        // Источник в списке выбора: название и признак «можно обновить» (по нему рисуется значок справа)
+        // Источник в списке выбора: название, признак «можно обновить» (по нему рисуется значок справа)
+        // и признак «сейчас в эфире» (неактивный источник показывается серым)
         private sealed class SourceItem : IBadgedItem
         {
-            public SourceItem(string name, bool canRefresh) { Name = name; CanRefresh = canRefresh; }
+            public SourceItem(string name, bool canRefresh, bool active) { Name = name; CanRefresh = canRefresh; Active = active; }
 
             public string Name { get; }
             public bool CanRefresh { get; }
+            public bool Active { get; }
             public bool HasBadge => CanRefresh;
+            public bool Dimmed => !Active;
 
             public override string ToString() => Name;
         }
@@ -473,6 +476,7 @@ namespace SourceRefresher
             private readonly ThemedSwitch _enabled;
             private readonly ThemedTextBox _name;
             private readonly StatusChip _chip;
+            private readonly ThemedButton _nameFromSource;
             private readonly ThemedButton _duplicate;
             private readonly ThemedButton _remove;
 
@@ -530,12 +534,16 @@ namespace SourceRefresher
                 _enabled = new ThemedSwitch { AccessibleName = Loc.SwitchTip };
                 _name = new ThemedTextBox { Font = Ui.Font(FontStyle.Bold, 1.1f), Height = inputH, Flat = true, AccessibleName = Loc.EditNameTip };
                 _chip = new StatusChip();
+                // кнопка только со значком копирования: подставляет название выбранного источника в название правила
+                _nameFromSource = new ThemedButton { Glyph = Ui.GlyphCopy, AccessibleName = Loc.CopySourceNameTip };
+                _nameFromSource.Click += (s, e) => CopySourceNameToRuleName();
                 _duplicate = new ThemedButton { Glyph = Ui.GlyphCopy, AccessibleName = Loc.DuplicateRule };
                 _duplicate.Click += (s, e) => DuplicateRequested?.Invoke(this, EventArgs.Empty);
                 _remove = new ThemedButton { Glyph = Ui.GlyphDelete, Tone = ButtonTone.Danger, AccessibleName = Loc.RemoveRule };
                 _remove.Click += (s, e) => RemoveRequested?.Invoke(this, EventArgs.Empty);
                 owner._tip.SetToolTip(_enabled, Loc.SwitchTip);
                 owner._tip.SetToolTip(_name, Loc.EditNameTip);
+                owner._tip.SetToolTip(_nameFromSource, Loc.CopySourceNameTip);
                 owner._tip.SetToolTip(_duplicate, Loc.DuplicateRule);
                 owner._tip.SetToolTip(_remove, Loc.RemoveRule);
 
@@ -543,7 +551,7 @@ namespace SourceRefresher
                 _sceneLabel = MakeLabel(Loc.Scene);
                 _scene = new ThemedPicker(editable: false) { Height = inputH, AccessibleName = Loc.Scene };
                 _sourceLabel = MakeLabel(Loc.Source);
-                _source = new ThemedPicker(editable: false) { Height = inputH, AccessibleName = Loc.Source, BadgeLegend = Loc.RefreshBadgeLegend };
+                _source = new ThemedPicker(editable: false) { Height = inputH, AccessibleName = Loc.Source, BadgeLegend = Loc.RefreshBadgeLegend, DimLegend = Loc.InactiveLegend };
                 _warnIcon = new WarningIcon { Visible = false };
                 _warnText = MakeLabel(Loc.NoRefreshWarning, color: ObsTheme.WarnAccent);
                 _warnText.Visible = false;
@@ -567,7 +575,7 @@ namespace SourceRefresher
                 // порядок добавления задаёт порядок Tab
                 foreach (Control control in new Control[]
                 {
-                    _enabled, _name, _chip, _duplicate, _remove,
+                    _enabled, _name, _nameFromSource, _chip, _duplicate, _remove,
                     _whatTitle, _sceneLabel, _scene, _sourceLabel, _source, _warnIcon, _warnText,
                     _whenTitle, _modeLabel, _mode, _everyLabel, _hours, _minutes, _seconds,
                     _conditionTitle, _onlySilent, _silentHelp, _summaryTitle, _summary
@@ -680,12 +688,14 @@ namespace SourceRefresher
 
                 int chipW = _chip.PreferredWidth;
                 int nameX = pad + switchW + gap;
-                int room = _duplicate.Left - gap - nameX - gap - chipW;
+                int copyW = Ui.Px(32), copyGap = Ui.Px(6);
+                int room = _duplicate.Left - gap - nameX - copyGap - copyW - gap - chipW;
                 int wanted = TextRenderer.MeasureText(_name.Text, _name.Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding).Width + Ui.Px(52);
                 int nameW = Math.Max(Ui.Px(100), Math.Min(Math.Max(wanted, Ui.Px(110)), room));
 
                 _name.SetBounds(nameX, Ui.Px(9), nameW, Ui.Px(30));
-                _chip.SetBounds(nameX + nameW + gap, Ui.Px(12), chipW, Ui.Px(24));
+                _nameFromSource.SetBounds(nameX + nameW + copyGap, Ui.Px(9), copyW, Ui.Px(30));
+                _chip.SetBounds(nameX + nameW + copyGap + copyW + gap, Ui.Px(12), chipW, Ui.Px(24));
             }
 
             private void PlaceRow(Label label, Control control, Point origin, int row, int blockW, int controlWidth = -1)
@@ -886,7 +896,7 @@ namespace SourceRefresher
 
                 // у каждого источника проверяем, можно ли его обновить: такие помечаются значком в списке
                 var items = new List<SourceItem>(names.Count);
-                foreach (var name in names) items.Add(new SourceItem(name, ObsRefresher.GetSupport(name) == RefreshSupport.Supported));
+                foreach (var name in names) items.Add(new SourceItem(name, ObsRefresher.GetSupport(name) == RefreshSupport.Supported, ObsRefresher.IsActive(name)));
 
                 _source.SetItems(items);
                 if (!string.IsNullOrEmpty(keep))
@@ -919,6 +929,18 @@ namespace SourceRefresher
             {
                 UpdateSummary();
                 UpdateChip();
+
+                // копировать нечего, пока источник не выбран, и незачем, когда название уже такое
+                _nameFromSource.Enabled = SelectedSource.Length > 0 && !string.Equals(RuleName, SelectedSource, StringComparison.Ordinal);
+            }
+
+            // Название правила становится названием выбранного источника (в пределах длины, которую можно ввести вручную)
+            private void CopySourceNameToRuleName()
+            {
+                string source = SelectedSource;
+                if (source.Length == 0) return;
+
+                _name.Text = source.Length > _name.InnerTextBox.MaxLength ? source.Substring(0, _name.InnerTextBox.MaxLength) : source;
             }
 
             // Одна фраза о том, что сделает правило с текущими настройками; обновляется вместе с правками
@@ -963,14 +985,19 @@ namespace SourceRefresher
                     {
                         case RuleStatusKind.SourceNotFound: text = Loc.ChipNotFound; break;
                         case RuleStatusKind.SceneInactive: text = Loc.ChipSceneInactive; break;
+                        case RuleStatusKind.SourceInactive: text = Loc.ChipSourceInactive; break;
                         case RuleStatusKind.WaitingStartup: text = Loc.ChipWaitingStartup; active = true; break;
                         case RuleStatusKind.StartupDone: text = Loc.ChipStartupDone; break;
                         case RuleStatusKind.WaitingSilence: text = Loc.ChipWaitingSilence; active = true; break;
                         case RuleStatusKind.Counting:
                             text = status!.Value.RemainingSeconds > 0 ? Loc.ChipCounting(Loc.Countdown(status.Value.RemainingSeconds)) : Loc.ChipRefreshingSoon;
                             break;
-                        // правило ещё не применено (его только что создали или изменили): плашка остаётся прежней
-                        default: return;
+                        // правило ещё не применено (его только что создали или изменили): плашка остаётся прежней,
+                        // а если прежней нет, пишем, что правило применяется
+                        default:
+                            if (_chip.Text.Length > 0) return;
+                            text = Loc.ChipApplying;
+                            break;
                     }
                 }
 

@@ -28,6 +28,8 @@ namespace SourceRefresher.Tests
             RefreshManager.SetRules(Array.Empty<RefreshRuleConfig>());
             RefreshManager.ProbeFactory = name => new ObsLevelProbe(name);
             RefreshManager.Refresh = ObsRefresher.TryRefresh;
+            RefreshManager.SceneActive = ObsRefresher.IsActive;
+            ObsRefresher.ActiveOverride = null;
             Plugin.ConfigPathOverride = null;
             Plugin.LogEnabled = true;
             try { Directory.Delete(Dir, recursive: true); } catch { }

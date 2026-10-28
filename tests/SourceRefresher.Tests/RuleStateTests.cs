@@ -178,6 +178,19 @@ namespace SourceRefresher.Tests
         }
 
         [Fact]
+        public void Status_DistinguishesInactiveSceneFromHiddenSource()
+        {
+            var interval = Interval(60, onlySilent: true);
+            Assert.Equal(RuleStatusKind.SceneInactive, interval.GetStatus(10 * Sec, true, active: false, sceneActive: false).Kind);
+            Assert.Equal(RuleStatusKind.SourceInactive, interval.GetStatus(10 * Sec, true, active: false, sceneActive: true).Kind);
+            Assert.Equal(RuleStatusKind.Counting, interval.GetStatus(10 * Sec, true, active: true, sceneActive: true).Kind);
+
+            var startup = new RefreshRuleState(Rules.Startup(), 0, true);
+            Assert.Equal(RuleStatusKind.SceneInactive, startup.GetStatus(0, true, false, sceneActive: false).Kind);
+            Assert.Equal(RuleStatusKind.SourceInactive, startup.GetStatus(0, true, false, sceneActive: true).Kind);
+        }
+
+        [Fact]
         public void Status_StartupPendingThenDone()
         {
             var state = new RefreshRuleState(Rules.Startup(), 0, true);

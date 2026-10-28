@@ -6,6 +6,7 @@ namespace SourceRefresher
         NotReady,
         SourceNotFound,
         SceneInactive,
+        SourceInactive,
         WaitingStartup,
         StartupDone,
         Counting,
@@ -29,16 +30,19 @@ namespace SourceRefresher
         private bool _waiting;
         private long _silentSinceMs = -1;
 
-        public RefreshRuleState(RefreshRuleConfig config, long nowMs, bool startupPending)
+        private readonly string _startupReason;
+
+        public RefreshRuleState(RefreshRuleConfig config, long nowMs, bool startupPending, string startupReason = "при запуске OBS")
         {
             Config = config;
             StartupPending = startupPending && config.IsStartup;
+            _startupReason = startupReason;
             _startMs = nowMs;
         }
 
         public RefreshRuleConfig Config { get; }
 
-        /// <summary>Обновление при запуске ещё не сделано (источник мог быть в неактивной сцене)</summary>
+        /// <summary>Обновление «при запуске» ещё не сделано в этой сессии OBS (источник мог быть в неактивной сцене)</summary>
         public bool StartupPending { get; private set; }
 
         /// <summary>Начать отсчёт интервала заново (OBS закончил загрузку)</summary>
@@ -58,7 +62,7 @@ namespace SourceRefresher
             {
                 if (!StartupPending || !found || !active) return null;
                 StartupPending = false;
-                return "при запуске OBS";
+                return _startupReason;
             }
 
             if (!_waiting && nowMs - _startMs >= Config.interval_seconds * 1000L) _waiting = true;
@@ -95,7 +99,13 @@ namespace SourceRefresher
             return reason;
         }
 
-        public RuleStatus GetStatus(long nowMs, bool found, bool active)
+        private static RuleStatusKind InactiveKind(bool sceneActive) => sceneActive ? RuleStatusKind.SourceInactive : RuleStatusKind.SceneInactive;
+
+        /// <summary>
+        /// sceneActive: сцена правила в эфире. Источник неактивен либо потому, что сцена не в эфире («Сцена неактивна»),
+        /// либо потому, что он скрыт в эфирной сцене («Источник неактивен»)
+        /// </summary>
+        public RuleStatus GetStatus(long nowMs, bool found, bool active, bool sceneActive = false)
         {
             if (!Config.enabled) return new RuleStatus(RuleStatusKind.Off);
             if (Config.source_name.Length == 0) return new RuleStatus(RuleStatusKind.NotReady);
@@ -104,10 +114,10 @@ namespace SourceRefresher
             if (Config.IsStartup)
             {
                 if (!StartupPending) return new RuleStatus(RuleStatusKind.StartupDone);
-                return new RuleStatus(active ? RuleStatusKind.WaitingStartup : RuleStatusKind.SceneInactive);
+                return new RuleStatus(active ? RuleStatusKind.WaitingStartup : InactiveKind(sceneActive));
             }
 
-            if (!active) return new RuleStatus(RuleStatusKind.SceneInactive);
+            if (!active) return new RuleStatus(InactiveKind(sceneActive));
 
             long left = Config.interval_seconds * 1000L - (nowMs - _startMs);
             if (_waiting || left <= 0) return new RuleStatus(Config.only_silent ? RuleStatusKind.WaitingSilence : RuleStatusKind.Counting);

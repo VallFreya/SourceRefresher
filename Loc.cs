@@ -58,15 +58,18 @@ namespace SourceRefresher
         public static string CopyName(string name) => Ru ? $"{name} (копия)" : $"{name} (copy)";
         public static string SwitchTip => Ru ? "Включить или выключить правило" : "Turn the rule on or off";
         public static string EditNameTip => Ru ? "Название правила: нажмите, чтобы изменить" : "Rule name: click to edit";
+        public static string CopySourceNameTip => Ru ? "Скопировать название источника в название правила" : "Copy the source name to the rule name";
         public static string RuleTitle(int number) => Ru ? $"Правило {number}" : $"Rule {number}";
 
         // Плашка состояния в заголовке карточки
         public static string ChipOff => Ru ? "Выключено" : "Off";
         public static string ChipNotReady => Ru ? "Не настроено" : "Not set up";
+        public static string ChipApplying => Ru ? "Применяется…" : "Applying…";
         public static string ChipNotFound => Ru ? "Источник не найден" : "Source not found";
         public static string ChipSceneInactive => Ru ? "Сцена неактивна" : "Scene is inactive";
+        public static string ChipSourceInactive => Ru ? "Источник неактивен" : "Source is inactive";
         public static string ChipWaitingStartup => Ru ? "Обновит при запуске" : "Will refresh at start";
-        public static string ChipStartupDone => Ru ? "Обновлено при запуске" : "Refreshed at start";
+        public static string ChipStartupDone => Ru ? "Обновлено в этой сессии" : "Refreshed this session";
         public static string ChipWaitingSilence => Ru ? "Ждёт тишины" : "Waiting for silence";
         public static string ChipRefreshingSoon => Ru ? "Сейчас обновит" : "Refreshing now";
         public static string ChipCounting(string left) => Ru ? $"Обновит через {left}" : $"Refreshes in {left}";
@@ -77,6 +80,7 @@ namespace SourceRefresher
         public static string Source => Ru ? "Источник:" : "Source:";
         // Пояснение значка в списке источников
         public static string RefreshBadgeLegend => Ru ? "Источник можно обновить" : "The source can be refreshed";
+        public static string InactiveLegend => Ru ? "Серым: источник сейчас неактивен" : "Grey: the source is inactive right now";
         public static string NoRefreshWarning => Ru
             ? "Этот источник нельзя обновить: у него нет кнопки обновления страницы"
             : "This source cannot be refreshed: it has no page refresh button";
@@ -108,8 +112,8 @@ namespace SourceRefresher
             ? "Выберите сцену и источник, и здесь появится описание."
             : "Pick a scene and a source, and a description will appear here.";
         public static string SummaryStartup(string source) => Ru
-            ? $"Один раз после запуска OBS источник **{source}** обновится. Если его сцена в этот момент неактивна, это случится, как только она станет активной."
-            : $"Once after OBS starts, **{source}** is refreshed. If its scene is inactive at that moment, it happens as soon as the scene becomes active.";
+            ? $"Один раз за запуск OBS источник **{source}** обновляется: при запуске или сразу после добавления правила, если в этой сессии он ещё не обновлялся. Если его сцена неактивна, это случится, когда она станет активной."
+            : $"Once per OBS session, **{source}** is refreshed: at start, or right after the rule is added if it has not been refreshed in this session yet. If its scene is inactive, it happens when the scene becomes active.";
         public static string SummaryInterval(string source, string time) => Ru
             ? $"Каждые **{time}** источник **{source}** обновляется, пока его сцена активна. Время идёт заново после каждого обновления."
             : $"Every **{time}**, **{source}** is refreshed while its scene is active. The time starts over after every refresh.";

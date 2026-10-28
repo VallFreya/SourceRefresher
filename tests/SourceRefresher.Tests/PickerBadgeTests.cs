@@ -11,8 +11,9 @@ namespace SourceRefresher.Tests
         private sealed class Item : IBadgedItem
         {
             private readonly string _name;
-            public Item(string name, bool badge) { _name = name; HasBadge = badge; }
+            public Item(string name, bool badge, bool dimmed = false) { _name = name; HasBadge = badge; Dimmed = dimmed; }
             public bool HasBadge { get; }
+            public bool Dimmed { get; }
             public override string ToString() => _name;
         }
 
@@ -26,11 +27,11 @@ namespace SourceRefresher.Tests
                 {
                     ObsTheme.Apply(true);
                     using var form = new Form { ClientSize = new Size(400, 300), StartPosition = FormStartPosition.Manual, Location = new Point(50, 50) };
-                    var picker = new ThemedPicker(editable: false) { Bounds = new Rectangle(20, 20, 300, 30), BadgeLegend = "Источник можно обновить" };
+                    var picker = new ThemedPicker(editable: false) { Bounds = new Rectangle(20, 20, 300, 30), BadgeLegend = "Источник можно обновить", DimLegend = "Серым: источник сейчас неактивен" };
                     form.Controls.Add(picker);
 
                     var items = new List<Item>();
-                    for (int i = 0; i < 12; i++) items.Add(new Item("Источник " + i, i % 3 == 0));
+                    for (int i = 0; i < 12; i++) items.Add(new Item("Источник " + i, i % 3 == 0, dimmed: i % 2 == 1 || i == 6));
                     picker.SetItems(items);
                     form.Show();
                     Application.DoEvents();

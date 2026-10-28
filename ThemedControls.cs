@@ -354,10 +354,14 @@ namespace SourceRefresher
         protected override void OnMouseDown(MouseEventArgs e) { _box.Focus(); base.OnMouseDown(e); }
     }
 
-    /// <summary>Элемент списка выбора, у которого справа может быть значок (например, «источник можно обновить»)</summary>
+    /// <summary>
+    /// Элемент списка выбора, у которого справа может быть значок (например, «источник можно обновить»)
+    /// и который может быть показан серым (например, источник сейчас неактивен)
+    /// </summary>
     internal interface IBadgedItem
     {
         bool HasBadge { get; }
+        bool Dimmed { get; }
     }
 
     /// <summary>Список выбора как QComboBox в OBS. С Editable можно печатать текст (поиск по списку)</summary>
@@ -406,6 +410,10 @@ namespace SourceRefresher
         /// <summary>Пояснение значка: показывается внизу выпадающего списка, если у каких-то элементов есть значок</summary>
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string BadgeLegend { get; set; } = "";
+
+        /// <summary>Пояснение серых элементов: показывается внизу выпадающего списка, если есть серые элементы</summary>
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public string DimLegend { get; set; } = "";
 
         /// <summary>Заменяет список вариантов; выбранный элемент сбрасывается без события</summary>
         public void SetItems(IEnumerable<object> items)
@@ -513,17 +521,18 @@ namespace SourceRefresher
             if (!_editable)
             {
                 int badgeW = 0;
+                bool dimmed = SelectedItem is IBadgedItem { Dimmed: true };
                 if (SelectedItem is IBadgedItem { HasBadge: true })
                 {
                     using var icon = Ui.IconFont(0.9f);
                     badgeW = Ui.Px(24);
-                    TextRenderer.DrawText(g, Ui.GlyphRefresh, icon, new Rectangle(Width - Height - badgeW, 0, badgeW, Height),
-                        Enabled ? ObsTheme.SuccessAccent : ObsTheme.TextMuted,
+                    Color badge = !Enabled ? ObsTheme.TextMuted : dimmed ? Ui.Mix(ObsTheme.SuccessAccent, FillColor, 0.6f) : ObsTheme.SuccessAccent;
+                    TextRenderer.DrawText(g, Ui.GlyphRefresh, icon, new Rectangle(Width - Height - badgeW, 0, badgeW, Height), badge,
                         TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
                 }
 
                 TextRenderer.DrawText(g, Text, Font, new Rectangle(Ui.Px(8), 0, Math.Max(0, Width - Height - Ui.Px(8) - badgeW), Height),
-                    Enabled ? ObsTheme.Text : ObsTheme.TextMuted,
+                    Enabled && !dimmed ? ObsTheme.Text : ObsTheme.TextMuted,
                     TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter
                     | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
             }
@@ -669,6 +678,7 @@ namespace SourceRefresher
             }
 
             _popup.List.Legend = BadgeLegend;
+            _popup.List.DimLegend = DimLegend;
             _popup.List.SetItems(_items, _selectedIndex);
 
             int height = Math.Min(_items.Count, MaxRows) * _popup.List.ItemHeight + _popup.List.FooterHeight + 2;
@@ -795,6 +805,7 @@ namespace SourceRefresher
     {
         private readonly List<string> _items = new List<string>();
         private readonly List<bool> _badges = new List<bool>();
+        private readonly List<bool> _dimmed = new List<bool>();
         private int _offset;
 
         public int Hot = -1;
@@ -817,8 +828,23 @@ namespace SourceRefresher
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string Legend { get; set; } = "";
 
-        /// <summary>Высота подвала с пояснением (0, если пояснять нечего)</summary>
-        public int FooterHeight => Legend.Length > 0 && _badges.Contains(true) ? Ui.Px(32) : 0;
+        /// <summary>Пояснение серых элементов внизу списка. Показывается, только если серые элементы есть</summary>
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public string DimLegend { get; set; } = "";
+
+        private bool ShowBadgeLegend => Legend.Length > 0 && _badges.Contains(true);
+        private bool ShowDimLegend => DimLegend.Length > 0 && _dimmed.Contains(true);
+        private int FooterRow => Ui.Px(28);
+
+        /// <summary>Высота подвала с пояснениями (0, если пояснять нечего): по строке на каждое пояснение</summary>
+        public int FooterHeight
+        {
+            get
+            {
+                int rows = (ShowBadgeLegend ? 1 : 0) + (ShowDimLegend ? 1 : 0);
+                return rows == 0 ? 0 : rows * FooterRow + Ui.Px(4);
+            }
+        }
 
         // Область самих строк: подвал с пояснением не прокручивается
         private int ViewHeight => Math.Max(0, Height - FooterHeight);
@@ -829,10 +855,12 @@ namespace SourceRefresher
         {
             _items.Clear();
             _badges.Clear();
+            _dimmed.Clear();
             foreach (var item in items)
             {
                 _items.Add(item.ToString() ?? "");
                 _badges.Add(item is IBadgedItem { HasBadge: true });
+                _dimmed.Add(item is IBadgedItem { Dimmed: true });
             }
 
             Current = current;
@@ -883,17 +911,20 @@ namespace SourceRefresher
                     g.FillPath(brush, path);
                 }
 
-                // значок справа от названия; на строке под курсором он белый, чтобы читался на синем фоне
+                // значок справа от названия; на строке под курсором он белый, чтобы читался на синем фоне.
+                // Серый элемент (неактивный источник): серый текст и значок, смешанный с фоном строки
                 int badgeW = _badges[i] ? Ui.Px(26) : 0;
                 if (_badges[i] && icon != null)
                 {
-                    TextRenderer.DrawText(g, Ui.GlyphRefresh, icon, new Rectangle(rect.Right - badgeW - Ui.Px(2), rect.Y, badgeW, rect.Height),
-                        i == Hot ? ObsTheme.Text : ObsTheme.SuccessAccent,
+                    Color rowBack = i == Hot ? ObsTheme.Primary : i == Current ? ObsTheme.ButtonBg : ObsTheme.BaseBg;
+                    Color badge = i == Hot ? ObsTheme.Text : ObsTheme.SuccessAccent;
+                    if (_dimmed[i]) badge = Ui.Mix(badge, rowBack, 0.6f);
+                    TextRenderer.DrawText(g, Ui.GlyphRefresh, icon, new Rectangle(rect.Right - badgeW - Ui.Px(2), rect.Y, badgeW, rect.Height), badge,
                         TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter);
                 }
 
                 TextRenderer.DrawText(g, _items[i], Font, new Rectangle(rect.X + Ui.Px(8), rect.Y, rect.Width - Ui.Px(12) - badgeW, rect.Height),
-                    ObsTheme.Text,
+                    _dimmed[i] ? ObsTheme.TextMuted : ObsTheme.Text,
                     TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter
                     | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
             }
@@ -914,7 +945,7 @@ namespace SourceRefresher
             DrawFooter(g);
         }
 
-        // Пояснение значка: тонкая линия сверху, значок и текст
+        // Пояснения: тонкая линия сверху, под ней по строке на значок и на серый вид
         private void DrawFooter(Graphics g)
         {
             int footer = FooterHeight;
@@ -923,12 +954,27 @@ namespace SourceRefresher
             int top = Height - footer;
             using (var line = new Pen(ObsTheme.CardBorder)) g.DrawLine(line, 0, top, Width, top);
 
-            using var icon = Ui.IconFont(0.9f);
             const TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
-            TextRenderer.DrawText(g, Ui.GlyphRefresh, icon, new Rectangle(Ui.Px(8), top, Ui.Px(24), footer), ObsTheme.SuccessAccent, flags | TextFormatFlags.HorizontalCenter);
             using var small = Ui.Font(scale: 0.92f);
-            TextRenderer.DrawText(g, Legend, small, new Rectangle(Ui.Px(36), top, Math.Max(0, Width - Ui.Px(44)), footer), ObsTheme.TextMuted,
-                flags | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+            int y = top + Ui.Px(4);
+            var textArea = new Rectangle(Ui.Px(36), 0, Math.Max(0, Width - Ui.Px(44)), FooterRow);
+
+            if (ShowBadgeLegend)
+            {
+                using var icon = Ui.IconFont(0.9f);
+                TextRenderer.DrawText(g, Ui.GlyphRefresh, icon, new Rectangle(Ui.Px(8), y, Ui.Px(24), FooterRow), ObsTheme.SuccessAccent, flags | TextFormatFlags.HorizontalCenter);
+                textArea.Y = y;
+                TextRenderer.DrawText(g, Legend, small, textArea, ObsTheme.TextMuted, flags | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+                y += FooterRow;
+            }
+
+            if (ShowDimLegend)
+            {
+                // образец серого вида: «Аа» тем же серым, что и неактивные источники в списке
+                TextRenderer.DrawText(g, "Аа", small, new Rectangle(Ui.Px(8), y, Ui.Px(24), FooterRow), ObsTheme.TextMuted, flags | TextFormatFlags.HorizontalCenter);
+                textArea.Y = y;
+                TextRenderer.DrawText(g, DimLegend, small, textArea, ObsTheme.TextMuted, flags | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+            }
         }
 
         protected override void OnMouseMove(MouseEventArgs e)

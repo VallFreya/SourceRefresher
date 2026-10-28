@@ -29,16 +29,21 @@ namespace SourceRefresher
             public string ProbeSource = "";
             public bool Found;
             public bool Active;
+            // сцена правила в эфире (нужна только для плашки: «Сцена неактивна» или «Источник неактивен»)
+            public bool SceneActive;
         }
 
         private static readonly object SyncLock = new object();
         private static readonly List<RuleRuntime> Rules = new List<RuleRuntime>();
+        // Источники, которые правило «при запуске» уже обновило в этой сессии OBS
+        private static readonly HashSet<string> StartupDone = new HashSet<string>(StringComparer.Ordinal);
         private static Timer? _timer;
         private static bool _loaded;
         private static int _ticking;
 
         /// <summary>Подмена измерителя и самого обновления в проверках: настоящие работают только внутри OBS</summary>
         internal static Func<string, ISourceProbe> ProbeFactory { get; set; } = name => new ObsLevelProbe(name);
+        internal static Func<string, bool> SceneActive { get; set; } = ObsRefresher.IsActive;
         internal static RefreshAction Refresh { get; set; } = ObsRefresher.TryRefresh;
 
         public static void Start()
@@ -56,6 +61,7 @@ namespace SourceRefresher
                 _timer?.Dispose();
                 _timer = null;
                 _loaded = false;
+                StartupDone.Clear();
                 foreach (var rule in Rules) DisposeProbe(rule);
                 ObsLevelProbe.DisposeAll();   // на случай измерителей, оставшихся открытыми: плагин выгружается
             }
@@ -86,10 +92,11 @@ namespace SourceRefresher
 
         /// <summary>
         /// Заменяет набор правил. Правило, у которого не изменилось ничего, влияющее на работу, сохраняет свой отсчёт
-        /// (смена названия или темы таймер не сбрасывает). initial: правила только что прочитаны из конфига при запуске,
-        /// и правила «при запуске» ждут своего обновления; правило, добавленное позже из окна, ждёт следующего запуска.
+        /// (смена названия или темы таймер не сбрасывает). Правило «при запуске» обновляет источник, если в этой сессии OBS
+        /// его ещё не обновляло правило «при запуске»: при запуске OBS, а у правила, добавленного из окна, сразу.
+        /// Копия правила или повторное включение уже обновлённый в этой сессии источник не обновляют.
         /// </summary>
-        public static void SetRules(IEnumerable<RefreshRuleConfig> rules, bool initial = false, long? nowMs = null)
+        public static void SetRules(IEnumerable<RefreshRuleConfig> rules, long? nowMs = null)
         {
             long now = nowMs ?? Environment.TickCount64;
 
@@ -119,7 +126,10 @@ namespace SourceRefresher
                     }
                     else
                     {
-                        Rules.Add(new RuleRuntime(new RefreshRuleState(copy, now, startupPending: initial && copy.enabled)));
+                        bool pending = copy.enabled && !StartupDone.Contains(copy.source_name);
+                        // до конца загрузки это обычное обновление при запуске, после неё правило добавили (или изменили) при работающем OBS
+                        string reason = _loaded ? "правило «при запуске» добавлено при работающем OBS" : "при запуске OBS";
+                        Rules.Add(new RuleRuntime(new RefreshRuleState(copy, now, pending, reason)));
                     }
                 }
 
@@ -147,7 +157,7 @@ namespace SourceRefresher
             lock (SyncLock)
             {
                 var rule = Rules.Find(r => r.State.Config.id == id);
-                return rule?.State.GetStatus(now, rule.Found, rule.Active);
+                return rule?.State.GetStatus(now, rule.Found, rule.Active, rule.SceneActive);
             }
         }
 
@@ -183,7 +193,7 @@ namespace SourceRefresher
                     if (!config.enabled || config.source_name.Length == 0)
                     {
                         DisposeProbe(rule);
-                        rule.Found = rule.Active = false;
+                        rule.Found = rule.Active = rule.SceneActive = false;
                         continue;
                     }
 
@@ -193,9 +203,15 @@ namespace SourceRefresher
                     float peak = probe.TakePeakDb();
                     rule.Found = probe.Attached;
                     rule.Active = rule.Found && probe.IsActive;
+                    // сцену спрашиваем, только когда источник неактивен: пока он в эфире, и его сцена в эфире
+                    rule.SceneActive = rule.Active || (rule.Found && config.scene_name.Length > 0 && SceneActive(config.scene_name));
 
                     string? reason = rule.State.Tick(nowMs, rule.Found, rule.Active, silent: peak <= config.silence_db);
-                    if (reason != null) (due ??= new List<(string, string)>()).Add((config.source_name, reason));
+                    if (reason == null) continue;
+
+                    // источник обновлён правилом «при запуске»: в этой сессии повторно его таким правилом не обновляем
+                    if (config.IsStartup) StartupDone.Add(config.source_name);
+                    (due ??= new List<(string, string)>()).Add((config.source_name, reason));
                 }
             }
 

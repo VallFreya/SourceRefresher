@@ -48,6 +48,42 @@ namespace SourceRefresher
         [DllImport("obs", CallingConvention = CallingConvention.Cdecl)]
         private static extern void obs_source_media_restart(IntPtr source);
 
+        [DllImport("obs", CallingConvention = CallingConvention.Cdecl)]
+        [return: MarshalAs(UnmanagedType.U1)]
+        private static extern bool obs_source_active(IntPtr source);
+
+        /// <summary>Подмена проверки активности в проверках вне OBS</summary>
+        internal static Func<string, bool>? ActiveOverride { get; set; }
+
+        /// <summary>
+        /// Источник или сцена сейчас в эфире. У источника это значит, что его сцена в эфире и он не скрыт в ней (глаз включён).
+        /// Не найден или ошибка: false
+        /// </summary>
+        public static bool IsActive(string sourceName)
+        {
+            if (ActiveOverride != null) return ActiveOverride(sourceName);
+            if (string.IsNullOrEmpty(sourceName)) return false;
+
+            IntPtr source = IntPtr.Zero;
+            try
+            {
+                source = obs_get_source_by_name(sourceName);
+                return source != IntPtr.Zero && obs_source_active(source);
+            }
+            catch
+            {
+                // нет obs.dll (проверки вне OBS) или источник пропал посреди вызова
+                return false;
+            }
+            finally
+            {
+                if (source != IntPtr.Zero)
+                {
+                    try { obs_source_release(source); } catch { }
+                }
+            }
+        }
+
         /// <summary>Подмена проверки в проверках вне OBS (настоящая работает только внутри OBS)</summary>
         internal static Func<string, RefreshSupport>? SupportOverride { get; set; }
 

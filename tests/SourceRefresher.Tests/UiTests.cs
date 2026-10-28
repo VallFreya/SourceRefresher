@@ -102,6 +102,41 @@ namespace SourceRefresher.Tests
         }
 
         [Fact]
+        public void CopySourceNameButton_PutsSourceNameIntoRuleName()
+        {
+            const System.Reflection.BindingFlags any = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance;
+
+            RunSta(() =>
+            {
+                var withSource = Rules.Interval(300, true, source: "Музыка наград");
+                withSource.name = "Правило 1";
+                var withoutSource = Rules.Startup(source: "");
+                withoutSource.name = "Правило 2";
+
+                using var form = new SettingsForm(new[] { withSource, withoutSource });
+                form.Show();
+                Application.DoEvents();
+
+                var cards = (System.Collections.IList)typeof(SettingsForm).GetField("_cards", any)!.GetValue(form)!;
+                ThemedButton ButtonOf(object card) => (ThemedButton)card.GetType().GetField("_nameFromSource", any)!.GetValue(card)!;
+                RefreshRuleConfig ConfigOf(object card) => (RefreshRuleConfig)card.GetType().GetMethod("ToConfig", any)!.Invoke(card, null)!;
+
+                // без выбранного источника копировать нечего
+                Assert.False(ButtonOf(cards[1]!).Enabled);
+
+                var button = ButtonOf(cards[0]!);
+                Assert.True(button.Enabled);
+                typeof(Control).GetMethod("OnClick", any)!.Invoke(button, new object[] { EventArgs.Empty });
+                Application.DoEvents();
+
+                Assert.Equal("Музыка наград", ConfigOf(cards[0]!).name);
+                Assert.False(button.Enabled);   // название уже такое
+                Assert.Equal("Правило 2", ConfigOf(cards[1]!).name);
+                form.Close();
+            });
+        }
+
+        [Fact]
         public void Window_BothThemes_Open()
         {
             RunSta(() =>
