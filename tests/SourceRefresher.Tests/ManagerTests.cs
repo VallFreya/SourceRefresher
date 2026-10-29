@@ -320,5 +320,68 @@ namespace SourceRefresher.Tests
             Assert.Equal(50, status.Value.RemainingSeconds);
             Assert.Null(RefreshManager.GetStatus("нет такого", 0));
         }
+
+        // Измеритель держит ссылку на источник OBS. Если её не отпустить при выходе из OBS, браузерные источники не удаляются
+        // до выгрузки obs-browser, и OBS падает при закрытии
+        [Fact]
+        public void ReleaseSources_ClosesProbesAndStopsChecking()
+        {
+            var created = new List<FakeProbe>();
+            RefreshManager.ProbeFactory = name =>
+            {
+                var probe = new FakeProbe();
+                created.Add(probe);
+                return probe;
+            };
+            RefreshManager.SetRules(new[] { Rules.Interval(10, false) }, nowMs: 0);
+            RefreshManager.MarkLoaded(0);
+            RefreshManager.TickOnce(Sec);
+            Assert.Single(created);
+            Assert.False(created[0].Disposed);
+
+            RefreshManager.ReleaseSources();
+
+            Assert.True(created[0].Disposed);
+            // срок интервала вышел, но пока источники отпущены, ничего не обновляется и новые измерители не создаются
+            RefreshManager.TickOnce(60 * Sec);
+            Assert.Single(created);
+            Assert.Empty(_refreshed);
+        }
+
+        [Fact]
+        public void ResumeSources_ConnectsProbesAgain()
+        {
+            var created = new List<FakeProbe>();
+            RefreshManager.ProbeFactory = name =>
+            {
+                var probe = new FakeProbe();
+                created.Add(probe);
+                return probe;
+            };
+            RefreshManager.SetRules(new[] { Rules.Interval(10, false) }, nowMs: 0);
+            RefreshManager.MarkLoaded(0);
+            RefreshManager.TickOnce(Sec);
+            RefreshManager.ReleaseSources();
+
+            RefreshManager.ResumeSources();
+            RefreshManager.TickOnce(2 * Sec);
+
+            Assert.Equal(2, created.Count);
+            Assert.True(created[0].Disposed);
+            Assert.False(created[1].Disposed);
+        }
+
+        [Fact]
+        public void ReleaseSources_StatusShowsSourceAsNotFound()
+        {
+            var rule = Rules.Interval(60, false);
+            RefreshManager.SetRules(new[] { rule }, nowMs: 0);
+            RefreshManager.MarkLoaded(0);
+            RefreshManager.TickOnce(Sec);
+
+            RefreshManager.ReleaseSources();
+
+            Assert.Equal(RuleStatusKind.SourceNotFound, RefreshManager.GetStatus(rule.id, 2 * Sec)!.Value.Kind);
+        }
     }
 }

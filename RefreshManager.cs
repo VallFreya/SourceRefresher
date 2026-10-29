@@ -39,6 +39,8 @@ namespace SourceRefresher
         private static readonly HashSet<string> StartupDone = new HashSet<string>(StringComparer.Ordinal);
         private static Timer? _timer;
         private static bool _loaded;
+        // Источники отпущены (выход из OBS или смена коллекции сцен): измерители закрыты и новые не создаются
+        private static bool _released;
         private static int _ticking;
 
         /// <summary>Подмена измерителя и самого обновления в проверках: настоящие работают только внутри OBS</summary>
@@ -61,10 +63,35 @@ namespace SourceRefresher
                 _timer?.Dispose();
                 _timer = null;
                 _loaded = false;
+                _released = false;
                 StartupDone.Clear();
                 foreach (var rule in Rules) DisposeProbe(rule);
                 ObsLevelProbe.DisposeAll();   // на случай измерителей, оставшихся открытыми: плагин выгружается
             }
+        }
+
+        /// <summary>
+        /// Отпускает все источники: закрывает измерители (каждый держит ссылку на источник) и до ResumeSources ничего не делает.
+        /// Вызывается, когда OBS выходит или чистит коллекцию сцен. Пока ссылки удерживаются, источники не удаляются,
+        /// и obs-browser останавливает CEF при ещё живых браузерных источниках: OBS падает при закрытии
+        /// </summary>
+        public static void ReleaseSources()
+        {
+            lock (SyncLock)
+            {
+                _released = true;
+                foreach (var rule in Rules)
+                {
+                    DisposeProbe(rule);
+                    rule.Found = rule.Active = rule.SceneActive = false;
+                }
+            }
+        }
+
+        /// <summary>Коллекция сцен загружена: измерители снова создаются при очередной проверке</summary>
+        public static void ResumeSources()
+        {
+            lock (SyncLock) _released = false;
         }
 
         /// <summary>OBS закончил загрузку: отсюда идёт отсчёт интервалов, и правила «при запуске» могут сработать</summary>
@@ -185,7 +212,7 @@ namespace SourceRefresher
 
             lock (SyncLock)
             {
-                if (!_loaded) return;
+                if (!_loaded || _released) return;
 
                 foreach (var rule in Rules)
                 {

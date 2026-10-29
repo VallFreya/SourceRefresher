@@ -13,6 +13,11 @@ namespace SourceRefresher
     {
         // OBS_FRONTEND_EVENT_FINISHED_LOADING из obs-frontend-api.h (проверено по заголовку OBS 32)
         private const int FrontendEventFinishedLoading = 26;
+        // Остальные события тоже из obs-frontend-api.h (OBS 32, номера по порядку в enum): после них источники нужно отпустить
+        private const int FrontendEventExit = 17;
+        private const int FrontendEventSceneCollectionChanged = 13;
+        private const int FrontendEventSceneCollectionCleanup = 25;
+        private const int FrontendEventSceneCollectionChanging = 34;
         // Страховка: если событие о конце загрузки не пришло, правила всё равно начинают работать
         private const int LoadedFallbackMs = 120_000;
 
@@ -182,7 +187,24 @@ namespace SourceRefresher
         {
             try
             {
-                if (frontendEvent == FrontendEventFinishedLoading) RefreshManager.MarkLoaded(Environment.TickCount64);
+                switch (frontendEvent)
+                {
+                    case FrontendEventFinishedLoading:
+                        RefreshManager.MarkLoaded(Environment.TickCount64);
+                        break;
+
+                    // Измерители держат ссылки на источники. Если не отпустить их до очистки сцен, источники (в том числе
+                    // браузерные) остаются живыми, пока obs-browser выгружается, и OBS падает при закрытии
+                    case FrontendEventExit:
+                    case FrontendEventSceneCollectionChanging:
+                    case FrontendEventSceneCollectionCleanup:
+                        RefreshManager.ReleaseSources();
+                        break;
+
+                    case FrontendEventSceneCollectionChanged:
+                        RefreshManager.ResumeSources();
+                        break;
+                }
             }
             catch (Exception ex)
             {
